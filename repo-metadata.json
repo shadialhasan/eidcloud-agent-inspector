@@ -1,0 +1,12 @@
+{
+  "description": "Wireshark for AI Agents - Interactive packet-level debugger, session replay, and trace analyzer in pure PHP",
+  "topics": [
+    "eidcloud",
+    "ai-observability",
+    "agent-debugging",
+    "agent-inspector",
+    "session-replay",
+    "trace-viewer",
+    "php8"
+  ]
+}

@@ -1,0 +1,119 @@
+{
+  "session_id": "session_sample_autonomous_coder_9912",
+  "metadata": {
+    "agent_name": "EidCloud-CodeBot",
+    "model": "claude-3-7-sonnet",
+    "environment": "production",
+    "initiated_by": "developer"
+  },
+  "frames": [
+    {
+      "frame_id": 1,
+      "type": "FRAME_PROMPT",
+      "timestamp": "2026-10-01T12:00:00Z",
+      "latency_ms": 15.0,
+      "input_tokens": 120,
+      "output_tokens": 0,
+      "payload": "Please analyze the database connection and update schema."
+    },
+    {
+      "frame_id": 2,
+      "type": "FRAME_THINK",
+      "timestamp": "2026-10-01T12:00:01Z",
+      "latency_ms": 450.0,
+      "input_tokens": 350,
+      "output_tokens": 80,
+      "payload": "I need to inspect the existing database credentials and run schema migrations safely."
+    },
+    {
+      "frame_id": 3,
+      "type": "FRAME_TOOL_CALL",
+      "timestamp": "2026-10-01T12:00:02Z",
+      "latency_ms": 30.0,
+      "input_tokens": 200,
+      "output_tokens": 45,
+      "tool_name": "filesystem",
+      "payload": {
+        "action": "read_file",
+        "path": "/etc/database/config.json"
+      }
+    },
+    {
+      "frame_id": 4,
+      "type": "FRAME_TOOL_RESULT",
+      "timestamp": "2026-10-01T12:00:03Z",
+      "latency_ms": 1850.0,
+      "input_tokens": 1500,
+      "output_tokens": 0,
+      "tool_name": "filesystem",
+      "payload": {
+        "status": "success",
+        "content": "{\"host\": \"db.internal\", \"port\": 5432, \"database\": \"production_db\"}"
+      }
+    },
+    {
+      "frame_id": 5,
+      "type": "FRAME_TOOL_CALL",
+      "timestamp": "2026-10-01T12:00:05Z",
+      "latency_ms": 25.0,
+      "input_tokens": 300,
+      "output_tokens": 40,
+      "tool_name": "postgres_migrator",
+      "payload": {
+        "command": "run_migrations",
+        "target": "v1.4"
+      }
+    },
+    {
+      "frame_id": 6,
+      "type": "FRAME_TOOL_RESULT",
+      "timestamp": "2026-10-01T12:00:08Z",
+      "latency_ms": 3200.0,
+      "input_tokens": 2400,
+      "output_tokens": 0,
+      "tool_name": "postgres_migrator",
+      "payload": {
+        "status": "success",
+        "tables_updated": 4,
+        "execution_time_seconds": 3.1
+      }
+    },
+    {
+      "frame_id": 7,
+      "type": "FRAME_TOOL_CALL",
+      "timestamp": "2026-10-01T12:00:11Z",
+      "latency_ms": 20.0,
+      "input_tokens": 250,
+      "output_tokens": 30,
+      "tool_name": "health_check",
+      "payload": {
+        "endpoint": "https://api.internal/health"
+      }
+    },
+    {
+      "frame_id": 8,
+      "type": "FRAME_ERROR",
+      "timestamp": "2026-10-01T12:00:12Z",
+      "latency_ms": 1100.0,
+      "input_tokens": 50,
+      "output_tokens": 0,
+      "tool_name": "health_check",
+      "payload": {
+        "error": "Connection timeout after 1000ms",
+        "http_code": 504
+      },
+      "metadata": {
+        "is_error": true
+      }
+    },
+    {
+      "frame_id": 9,
+      "type": "FRAME_ANSWER",
+      "timestamp": "2026-10-01T12:00:13Z",
+      "latency_ms": 620.0,
+      "input_tokens": 850,
+      "output_tokens": 140,
+      "payload": "Database schema was successfully migrated to v1.4. However, the health check returned a 504 timeout."
+    }
+  ]
+}

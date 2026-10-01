@@ -1,0 +1,237 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+// Locate autoloader
+if (file_exists(__DIR__ . '/../vendor/autoload.php')) {
+    require_once __DIR__ . '/../vendor/autoload.php';
+} else {
+    require_once __DIR__ . '/../src/autoload.php';
+}
+
+use EidCloud\AgentInspector\Filter\TraceFilter;
+use EidCloud\AgentInspector\Formatter\ConsoleFormatter;
+use EidCloud\AgentInspector\Inspector;
+use EidCloud\AgentInspector\Packets\Frame;
+use EidCloud\AgentInspector\Packets\FrameType;
+
+$options = [];
+$args = [];
+
+for ($i = 1; $i < $argc; $i++) {
+    $arg = $argv[$i];
+    if (str_starts_with($arg, '--')) {
+        $opt = substr($arg, 2);
+        if (str_contains($opt, '=')) {
+            [$key, $val] = explode('=', $opt, 2);
+            $options[$key] = $val;
+        } else {
+            // Check if next arg is value
+            $next = $argv[$i + 1] ?? null;
+            if ($next !== null && !str_starts_with($next, '-')) {
+                $options[$opt] = $next;
+                $i++;
+            } else {
+                $options[$opt] = true;
+            }
+        }
+    } elseif (str_starts_with($arg, '-')) {
+        $opt = substr($arg, 1);
+        if ($opt === 'h') {
+            $options['help'] = true;
+        } else {
+            $options[$opt] = true;
+        }
+    } else {
+        $args[] = $arg;
+    }
+}
+
+$command = $args[0] ?? null;
+$targetFile = $args[1] ?? null;
+
+$showHelp = isset($options['h']) || isset($options['help']) || $command === null || in_array($command, ['help', '--help', '-h']);
+
+if ($showHelp) {
+    printHelp();
+    exit(0);
+}
+
+$useColor = !isset($options['no-color']);
+$inspector = new Inspector($useColor);
+$formatter = $inspector->getFormatter();
+
+if ($targetFile === null) {
+    echo "\033[1;31mError:\033[0m Missing session trace file path.\n\n";
+    printHelp();
+    exit(1);
+}
+
+if (!file_exists($targetFile)) {
+    echo "\033[1;31mError:\033[0m Target file not found: {$targetFile}\n";
+    exit(1);
+}
+
+try {
+    $session = $inspector->loadFromFile($targetFile);
+} catch (Throwable $e) {
+    echo "\033[1;31mError parsing session:\033[0m " . $e->getMessage() . "\n";
+    exit(1);
+}
+
+// Execute requested command
+switch (strtolower($command)) {
+    case 'inspect':
+        handleInspect($session, $formatter, $inspector, isset($options['json']));
+        break;
+
+    case 'replay':
+        $speed = isset($options['speed']) ? parseSpeed((string)$options['speed']) : 1.0;
+        handleReplay($session, $inspector, $formatter, $speed);
+        break;
+
+    case 'filter':
+        handleFilter($session, $options, $formatter, $inspector, isset($options['json']));
+        break;
+
+    case 'bottlenecks':
+        $minLat = isset($options['min-latency']) ? (float)$options['min-latency'] : 1500.0;
+        $minTok = isset($options['min-tokens']) ? (int)$options['min-tokens'] : 2000;
+        handleBottlenecks($session, $formatter, $minLat, $minTok);
+        break;
+
+    default:
+        echo "\033[1;31mError:\033[0m Unknown command '{$command}'. Available: inspect, replay, filter, bottlenecks\n";
+        exit(1);
+}
+
+function handleInspect(\EidCloud\AgentInspector\Packets\Session $session, ConsoleFormatter $formatter, Inspector $inspector, bool $json): void
+{
+    if ($json) {
+        echo $inspector->exportJson($session, true) . "\n";
+        return;
+    }
+
+    echo $formatter->renderSessionSummary($session);
+    echo "  " . "\033[1mExecution Packet Timeline:\033[0m\n";
+    echo $formatter->renderTimelineTable($session->getFrames());
+}
+
+function handleReplay(\EidCloud\AgentInspector\Packets\Session $session, Inspector $inspector, ConsoleFormatter $formatter, float $speed): void
+{
+    echo $formatter->renderHeader("SESSION REPLAY: {$session->sessionId} (Speed: {$speed}x)");
+    $replayer = $inspector->createReplayer($session);
+    
+    $replayer->replay($speed, function (Frame $frame, int $index, int $total) use ($formatter): void {
+        echo "\033[1;30m[" . date('H:i:s') . "] Step {$index}/{$total}\033[0m";
+        echo $formatter->renderFrameDetail($frame);
+    });
+
+    echo "\n\033[32m✔ Replay completed for {$session->count()} packet frame(s).\033[0m\n\n";
+}
+
+function handleFilter(\EidCloud\AgentInspector\Packets\Session $session, array $options, ConsoleFormatter $formatter, Inspector $inspector, bool $json): void
+{
+    $filter = new TraceFilter();
+
+    if (isset($options['tool'])) {
+        $filter->byTool((string)$options['tool']);
+    }
+    if (isset($options['type'])) {
+        $t = strtoupper((string)$options['type']);
+        if (!str_starts_with($t, 'FRAME_')) {
+            $t = 'FRAME_' . $t;
+        }
+        $frameType = FrameType::tryFrom($t);
+        if ($frameType !== null) {
+            $filter->byType($frameType);
+        }
+    }
+    if (isset($options['min-latency'])) {
+        $filter->minLatency((float)$options['min-latency']);
+    }
+    if (isset($options['min-tokens'])) {
+        $filter->minTokens((int)$options['min-tokens']);
+    }
+    if (isset($options['errors-only'])) {
+        $filter->errorsOnly(true);
+    }
+    if (isset($options['search'])) {
+        $filter->search((string)$options['search']);
+    }
+
+    $filteredSession = $filter->filterSession($session);
+
+    if ($json) {
+        echo $inspector->exportJson($filteredSession, true) . "\n";
+        return;
+    }
+
+    echo $formatter->renderSessionSummary($filteredSession);
+    echo "  \033[1mFiltered Packet Timeline:\033[0m\n";
+    echo $formatter->renderTimelineTable($filteredSession->getFrames());
+}
+
+function handleBottlenecks(\EidCloud\AgentInspector\Packets\Session $session, ConsoleFormatter $formatter, float $latencyMs, int $tokens): void
+{
+    echo $formatter->renderHeader("BOTTLENECK ANALYSIS: {$session->sessionId}");
+    echo "  Criteria: Latency >= {$latencyMs} ms OR Tokens >= {$tokens}\n\n";
+
+    $bottlenecks = $session->findBottlenecks($latencyMs, $tokens);
+    if (empty($bottlenecks)) {
+        echo "\033[32m✔ No performance bottlenecks detected matching the criteria.\033[0m\n\n";
+        return;
+    }
+
+    echo $formatter->renderTimelineTable($bottlenecks);
+
+    foreach ($bottlenecks as $b) {
+        echo $formatter->renderFrameDetail($b);
+    }
+}
+
+function parseSpeed(string $speedStr): float
+{
+    $clean = rtrim(strtolower($speedStr), 'x');
+    $val = (float)$clean;
+    return $val >= 0 ? $val : 1.0;
+}
+
+function printHelp(): void
+{
+    $art = <<<ART
+  ___ _     _ _____ _                 _ 
+ / _ (_) __| / ____| |               | |
+|  __/ |/ _` | |   | | ___  _   _  __| |
+ \___|_|\__,_|_|   |_|/ _ \| | | |/ _` |
+    AGENT INSPECTOR (v1.0.0) - Wireshark for AI Agents
+ART;
+
+    echo "\033[1;36m" . $art . "\033[0m\n\n";
+    echo "\033[1mUSAGE:\033[0m\n";
+    echo "  php bin/eidcloud-inspector <command> <session-file> [options]\n\n";
+    echo "\033[1mCOMMANDS:\033[0m\n";
+    echo "  \033[33minspect\033[0m      Display session overview, token totals, and interactive timeline table\n";
+    echo "  \033[33mreplay\033[0m       Step through execution turn-by-turn with simulated speed\n";
+    echo "  \033[33mfilter\033[0m       Filter frames by tool, frame type, latency, error status, or search query\n";
+    echo "  \033[33mbottlenecks\033[0m  Detect slow tool calls and token-heavy frames in execution\n\n";
+    echo "\033[1mOPTIONS:\033[0m\n";
+    echo "  \033[36m--speed=<Nx>\033[0m           Replay speed multiplier (e.g. 1x, 2x, 5x, 0 for instant)\n";
+    echo "  \033[36m--tool=<name>\033[0m          Filter frames matching tool name (e.g. filesystem, bash, api)\n";
+    echo "  \033[36m--type=<type>\033[0m          Filter by frame type (PROMPT, THINK, TOOL_CALL, TOOL_RESULT, ANSWER)\n";
+    echo "  \033[36m--min-latency=<ms>\033[0m     Filter frames exceeding duration in milliseconds\n";
+    echo "  \033[36m--min-tokens=<n>\033[0m       Filter frames exceeding token count\n";
+    echo "  \033[36m--errors-only\033[0m          Only show failed or error frames\n";
+    echo "  \033[36m--search=<text>\033[0m        Search payload and metadata for substring\n";
+    echo "  \033[36m--json\033[0m                 Output results as machine-readable JSON packet dump\n";
+    echo "  \033[36m--no-color\033[0m             Disable ANSI terminal color codes\n";
+    echo "  \033[36m-h, --help\033[0m             Show this help screen\n\n";
+    echo "\033[1mEXAMPLES:\033[0m\n";
+    echo "  php bin/eidcloud-inspector inspect session.json\n";
+    echo "  php bin/eidcloud-inspector replay session.json --speed=2x\n";
+    echo "  php bin/eidcloud-inspector filter session.json --tool=filesystem\n";
+    echo "  php bin/eidcloud-inspector filter session.json --errors-only\n";
+    echo "  php bin/eidcloud-inspector bottlenecks session.json --min-latency=1200\n";
+    echo "  php bin/eidcloud-inspector inspect session.json --json > dump.json\n\n";
+}

@@ -1,0 +1,26 @@
+{
+  "name": "eidcloud/agent-inspector",
+  "description": "Wireshark for AI Agents - Interactive packet-level debugger, session replay, and trace analyzer in pure PHP",
+  "license": "MIT",
+  "type": "library",
+  "authors": [
+    {
+      "name": "Eng. MHD. Shadi AL-Hasan",
+      "homepage": "https://eidcloud.com"
+    }
+  ],
+  "require": {
+    "php": ">=8.2"
+  },
+  "autoload": {
+    "psr-4": {
+      "EidCloud\\AgentInspector\\": "src/"
+    }
+  },
+  "bin": [
+    "bin/eidcloud-inspector"
+  ],
+  "scripts": {
+    "test": "php tests/run_tests.php"
+  }
+}
